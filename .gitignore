@@ -6,7 +6,7 @@ env/
 # Папка с данными для мониторинга
 ИЮЛЬ/
 reports/
-static/logos/
+
 config.yaml
 parsers/config.yaml
 broadcast_processor/config.yaml
