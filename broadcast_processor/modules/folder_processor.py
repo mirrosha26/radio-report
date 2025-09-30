@@ -24,6 +24,50 @@ def read_folder_path():
         print(f"❌ Ошибка чтения config.yaml: {e}")
         return 'ИЮЛЬ'
 
+def normalize_tag(raw_tag: str) -> str:
+    """Нормализует строку тега до канонического вида (без учета регистра и лишних символов)."""
+    if not raw_tag:
+        return ''
+
+    tag = raw_tag.strip().lower()
+
+    # Заменяем различные виды дефисов на пробел
+    tag = tag.replace('—', ' ').replace('–', ' ').replace('-', ' ')
+
+    # Убираем двоеточия и прочую пунктуацию, оставляя буквы/цифры/пробел/подчеркивание
+    tag = re.sub(r"[^\w\sа-яё]", " ", tag, flags=re.IGNORECASE)
+
+    # Нормализуем пробелы
+    tag = re.sub(r"\s+", " ", tag).strip()
+
+    # Частные приведения к единому написанию
+    aliases = {
+        'губернатор': 'губер',
+        'губер н': 'губер',
+        'губер n': 'губер',
+        'гор дума': 'гордума',
+        'гор. дума': 'гордума',
+        'городская дума': 'гордума',
+        'обл дума': 'облдума',
+        'обл. дума': 'облдума',
+        'администрация': 'админ',
+        'администрации': 'админ',
+    }
+
+    if tag in aliases:
+        tag = aliases[tag]
+
+    # Также схлопываем пробелы внутри ключевых двусловных тегов
+    tag_compact = tag.replace(' ', '')
+    compact_map = {
+        'гордума': 'гордума',
+        'облдума': 'облдума',
+    }
+    if tag_compact in compact_map:
+        tag = compact_map[tag_compact]
+
+    return tag
+
 def parse_text_into_points(text_content):
     """Разбивает текст на пункты и создает список словарей"""
     if not text_content or not isinstance(text_content, str):
@@ -36,17 +80,17 @@ def parse_text_into_points(text_content):
     patterns = [
         # Универсальные паттерны с гибкой обработкой пробелов
         # Формат с точкой: 1. (тег-время) или 1.(тег время)
-        r'(\d+)\.\s*\(\s*([^-()]+?)\s*-\s*(\d+)\s*\)\s*(.*?)(?=\d+[.)]\s*\(|$)',  # тег-время
+        r'(\d+)\.\s*\(\s*([^-()]+?)\s*[-–—]?\s*(\d+)\s*\)\s*(.*?)(?=\d+[.)]\s*\(|$)',  # тег-время с разными дефисами
         r'(\d+)\.\s*\(\s*([^-()0-9\s]+(?:\s+[^-()0-9\s]+)*)\s+(\d+)\s*\)\s*(.*?)(?=\d+[.)]\s*\(|$)',  # тег время
         
         # Формат со скобкой: 1) (тег-время) или 1)(тег время)  
-        r'(\d+)\)\s*\(\s*([^-()]+?)\s*-\s*(\d+)\s*\)\s*(.*?)(?=\d+[.)]\s*\(|$)',  # тег-время
+        r'(\d+)\)\s*\(\s*([^-()]+?)\s*[-–—]?\s*(\d+)\s*\)\s*(.*?)(?=\d+[.)]\s*\(|$)',  # тег-время
         r'(\d+)\)\s*\(\s*([^-()0-9\s]+(?:\s+[^-()0-9\s]+)*)\s+(\d+)\s*\)\s*(.*?)(?=\d+[.)]\s*\(|$)',  # тег время
         
         # Запасные паттерны для последнего пункта (без lookahead)
-        r'(\d+)\.\s*\(\s*([^-()]+?)\s*-\s*(\d+)\s*\)\s*(.*?)$',
+        r'(\d+)\.\s*\(\s*([^-()]+?)\s*[-–—]?\s*(\d+)\s*\)\s*(.*?)$',
         r'(\d+)\.\s*\(\s*([^-()0-9\s]+(?:\s+[^-()0-9\s]+)*)\s+(\d+)\s*\)\s*(.*?)$',
-        r'(\d+)\)\s*\(\s*([^-()]+?)\s*-\s*(\d+)\s*\)\s*(.*?)$',
+        r'(\d+)\)\s*\(\s*([^-()]+?)\s*[-–—]?\s*(\d+)\s*\)\s*(.*?)$',
         r'(\d+)\)\s*\(\s*([^-()0-9\s]+(?:\s+[^-()0-9\s]+)*)\s+(\d+)\s*\)\s*(.*?)$'
     ]
     
@@ -54,7 +98,7 @@ def parse_text_into_points(text_content):
     found_positions = set()  # Отслеживаем уже найденные позиции, чтобы избежать дубликатов
     
     for i, pattern in enumerate(patterns):
-        matches = re.finditer(pattern, text_content, re.DOTALL)
+        matches = re.finditer(pattern, text_content, re.DOTALL | re.IGNORECASE)
         
         for match in matches:
             start_pos = match.start()
@@ -64,9 +108,11 @@ def parse_text_into_points(text_content):
                 found_positions.add(start_pos)
                 
                 point_number = int(match.group(1))
-                tag = match.group(2).strip()  # тег (губер, админ и т.д.)
+                raw_tag = match.group(2).strip()  # тег (губер, админ и т.д.)
                 seconds = int(match.group(3))  # время из скобок
                 point_text = match.group(4).strip()  # текст пункта
+
+                tag = normalize_tag(raw_tag)
                 
                 # Проверяем, что пункт содержит достаточную длину
                 if len(point_text) >= 10:
