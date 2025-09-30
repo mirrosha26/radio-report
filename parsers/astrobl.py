@@ -282,7 +282,7 @@ class AstroblParser:
         for p in cell.paragraphs:
             self.replace_variables_in_paragraph(p, company_config, news_with_keywords, doc)
 
-    def process_template_document(self, news_with_keywords, company_name='Астробол'):
+    def process_template_document(self, news_with_keywords, company_name='Юмор'):
         try:
             company_config = self.config.get('reports', {}).get('docs', {}).get(company_name, {})
             template_paths = [
