@@ -76,7 +76,9 @@ class AstroblParser:
             return False, []
         found = []
         for kw in self.search_list:
-            if re.search(re.escape(kw), title, flags=re.IGNORECASE):
+            # Ищем ключ как отдельное слово/фразу (границы слова), чтобы 'СВО' не совпадал с 'свои'
+            pattern = r"(?<!\w)" + re.escape(kw) + r"(?!\w)"
+            if re.search(pattern, title, flags=re.IGNORECASE):
                 found.append(kw)
         return len(found) > 0, found
 
@@ -351,8 +353,18 @@ class AstroblParser:
                 break
         print(f"Итого собрано: {len(all_items)}")
         news_with_kw = [x for x in all_items if x.get('has_search_keywords')]
+        # Сортируем от самых старых к самым новым по ISO-дате (YYYY-MM-DD)
+        def _date_key(item):
+            d = item.get('date') or ''
+            if re.match(r"\d{4}-\d{2}-\d{2}", d):
+                try:
+                    return datetime.strptime(d, '%Y-%m-%d')
+                except Exception:
+                    return datetime.min
+            return datetime.min
+        news_with_kw.sort(key=_date_key)
         print(f"Совпадений по ключевым словам: {len(news_with_kw)}")
-        self.process_template_document(news_with_kw, company_name='Астробол')
+        self.process_template_document(news_with_kw, company_name='Юмор')
 
 
 def main():

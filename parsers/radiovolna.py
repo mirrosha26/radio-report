@@ -72,15 +72,15 @@ class RadioVolnaParser:
             return "2025-09-01", "2025-09-23", [], "data", {}
 
     def check_keywords_in_title(self, title):
-        """Проверяет наличие ключевых слов в заголовке с помощью регулярных выражений"""
+        """Проверяет наличие ключевых слов в заголовке с учетом границ слова"""
         if not self.search_list or not title:
             return False, []
         
         found_keywords = []
         
         for keyword in self.search_list:
-            # Создаем регулярное выражение для поиска слова (игнорируем регистр)
-            pattern = re.compile(re.escape(keyword), re.IGNORECASE)
+            # Ищем точное вхождение слова/фразы с границами: не часть большего слова
+            pattern = re.compile(r"(?<!\w)" + re.escape(keyword) + r"(?!\w)", re.IGNORECASE)
             if pattern.search(title):
                 found_keywords.append(keyword)
         
@@ -531,7 +531,7 @@ class RadioVolnaParser:
         for paragraph in cell.paragraphs:
             self.replace_variables_in_paragraph(paragraph, company_config, news_with_keywords, doc)
 
-    def process_template_document(self, news_with_keywords, company_name='Южка'):
+    def process_template_document(self, news_with_keywords, company_name='Южная Волна'):
         """Обрабатывает template.docx: копирует шаблон, заменяет переменные включая $report"""
         try:
             # Получаем конфигурацию компании
@@ -774,6 +774,17 @@ def main():
             print("Статистика ключевых слов:")
             for keyword, count in sorted(keyword_count.items(), key=lambda x: x[1], reverse=True):
                 print(f"  '{keyword}': {count} упоминаний")
+        
+        # Сортируем новости (с ключевыми словами) от старых к новым по ISO-дате
+        def _date_key(item):
+            d = item.get('date') or ''
+            if re.match(r"\d{4}-\d{2}-\d{2}", d):
+                try:
+                    return datetime.strptime(d, '%Y-%m-%d')
+                except Exception:
+                    return datetime.min
+            return datetime.min
+        news_with_keywords.sort(key=_date_key)
         
         # Обрабатываем template.docx
         print(f"\n{'='*60}")

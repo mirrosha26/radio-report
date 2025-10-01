@@ -421,6 +421,29 @@ def create_excel_report():
                     
                     points = cursor.fetchall()
                     
+                    # Сортируем по дате/времени из имени файла (от ранней к поздней)
+                    if points:
+                        from datetime import datetime
+                        def _dt_key(rec):
+                            # rec: (point_number, filename, tag, seconds, content, short_content, created_at)
+                            fn = rec[1]
+                            m = re.search(r'(\d{1,2})\.(\d{2})\s+на\s+(\d{1,2})-(\d{2})\D?', fn)
+                            if m:
+                                d, M, h, m_ = m.groups()
+                                try:
+                                    return datetime(int(year), int(M), int(d), int(h), int(m_))
+                                except:
+                                    return datetime.min
+                            m2 = re.search(r'(\d{1,2})\.(\d{2})', fn)
+                            if m2:
+                                d, M = m2.groups()
+                                try:
+                                    return datetime(int(year), int(M), int(d))
+                                except:
+                                    return datetime.min
+                            return datetime.min
+                        points = sorted(points, key=_dt_key)
+                    
                     if points:
                         # Начинаем запись данных с 15-й строки (шапка в 14-й)
                         start_row = 15
@@ -439,14 +462,21 @@ def create_excel_report():
                         for i, point in enumerate(points, 1):
                             point_number, filename, tag, seconds, content, short_content, created_at = point
                             
-                            # Извлекаем дату и время из имени файла (например, "КП 01.07 на 18-30" -> "01.07.2024 18:30")
-                            date_time_match = re.search(r'(\d{2}\.\d{2})\s+на\s+(\d{2}-\d{2})', filename)
-                            if date_time_match:
-                                date_part = date_time_match.group(1)  # "01.07"
-                                time_part = date_time_match.group(2).replace('-', ':')  # "18-30" -> "18:30"
-                                broadcast_date_time = f"{date_part}.{year} {time_part}"  # "01.07.2024 18:30"
+                            # Извлекаем дату и время из имени файла (поддержка 1-2 цифр дня/часа и возможной буквы после времени)
+                            dt_match = re.search(r'(\d{1,2})\.(\d{2})\s+на\s+(\d{1,2})-(\d{2})\D?', filename)
+                            if dt_match:
+                                d, M, h, m_ = dt_match.groups()
+                                date_part = f"{int(d):02d}.{M}"
+                                time_part = f"{int(h):02d}:{m_}"
+                                broadcast_date_time = f"{date_part}.{year} {time_part}"
                             else:
-                                broadcast_date_time = "Дата не найдена"
+                                d_match = re.search(r'(\d{1,2})\.(\d{2})', filename)
+                                if d_match:
+                                    d, M = d_match.groups()
+                                    date_part = f"{int(d):02d}.{M}"
+                                    broadcast_date_time = f"{date_part}.{year}"
+                                else:
+                                    broadcast_date_time = "Дата не найдена"
                             
                             # Используем сокращенный текст, если есть, иначе полный
                             display_text = short_content if short_content else content[:100] + "..." if len(content) > 100 else content
@@ -675,6 +705,30 @@ def create_simple_excel_report():
                 
                 points = cursor.fetchall()
                 
+                # Сортируем по дате/времени из имени файла (от ранней к поздней)
+                if points:
+                    from datetime import datetime
+                    def _dt_key(rec):
+                        # rec: (point_number, filename, tag, seconds, content, short_content, created_at)
+                        fn = rec[1]
+                        m = re.search(r'(\d{1,2})\.(\d{2})\s+на\s+(\d{1,2})-(\d{2})\D?', fn)
+                        if m:
+                            d, M, h, m_ = m.groups()
+                            try:
+                                # Для простого отчета год не задаётся явно; возьмем текущий год
+                                return datetime(datetime.now().year, int(M), int(d), int(h), int(m_))
+                            except:
+                                return datetime.min
+                        m2 = re.search(r'(\d{1,2})\.(\d{2})', fn)
+                        if m2:
+                            d, M = m2.groups()
+                            try:
+                                return datetime(datetime.now().year, int(M), int(d))
+                            except:
+                                return datetime.min
+                        return datetime.min
+                    points = sorted(points, key=_dt_key)
+                
                 if points:
                     # Заголовки
                     headers = ['№', 'Дата эфира', 'Тег', 'Текст (сокращенный)', 'Секунды']
@@ -689,9 +743,13 @@ def create_simple_excel_report():
                     for i, point in enumerate(points, 1):
                         point_number, filename, tag, seconds, content, short_content, created_at = point
                         
-                        # Извлекаем дату из имени файла (например, "КП 01.07 на 18-30" -> "01.07")
-                        date_match = re.search(r'(\d{2}\.\d{2})', filename)
-                        broadcast_date = date_match.group(1) if date_match else "Дата не найдена"
+                        # Извлекаем дату из имени файла (поддержка 1-2 цифр дня)
+                        d_match = re.search(r'(\d{1,2})\.(\d{2})', filename)
+                        if d_match:
+                            d, M = d_match.groups()
+                            broadcast_date = f"{int(d):02d}.{M}"
+                        else:
+                            broadcast_date = "Дата не найдена"
                         
                         # Используем сокращенный текст, если есть, иначе полный
                         display_text = short_content if short_content else content[:100] + "..." if len(content) > 100 else content
