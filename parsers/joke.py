@@ -277,7 +277,7 @@ class JokeParser:
             r1[1].paragraphs[0].alignment = 1
             r1[2].text = '«Новости»'
             r1[2].paragraphs[0].alignment = 1
-            r1[3].text = news['title']
+            r1[3].text = news['title'] + ' ' + news['url']
             
         return table
 

@@ -363,7 +363,7 @@ def create_excel_report():
                 print(f"\n📁 Обрабатываем папку: {folder_name}")
                 
                 # Создаем папку для этой группы
-                folder_dir = export_dir / folder_name
+                folder_dir = export_dir / (folder_name + datetime.now().strftime("_%Y%m%d_%H%M%S"))
                 folder_dir.mkdir(exist_ok=True)
                 
                 # Получаем конфигурацию для этой папки

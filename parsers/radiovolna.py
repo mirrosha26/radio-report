@@ -79,8 +79,8 @@ class RadioVolnaParser:
         found_keywords = []
         
         for keyword in self.search_list:
-            # Ищем точное вхождение слова/фразы с границами: не часть большего слова
-            pattern = re.compile(r"(?<!\w)" + re.escape(keyword) + r"(?!\w)", re.IGNORECASE)
+            # Строгое вхождение по границам слова/фразы, чувствительно к регистру
+            pattern = re.compile(r"(?<!\\w)" + re.escape(keyword) + r"(?!\\w)")
             if pattern.search(title):
                 found_keywords.append(keyword)
         
@@ -136,6 +136,30 @@ class RadioVolnaParser:
         except requests.RequestException as e:
             print(f"Ошибка загрузки {url}: {e}")
             return None
+
+    def fetch_article_body_text(self, url: str) -> str:
+        html = self.get_page_content(url)
+        if not html:
+            return ''
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            root = soup.select_one('div.l-page__main > div.l-section')
+            if not root:
+                # fallback: детальный блок
+                root = soup.select_one('.l-news-detail, .b-news-detail-body, [itemprop="articleBody"]')
+            return root.get_text(' ', strip=True) if root else ''
+        except Exception:
+            return ''
+
+    def check_keywords_in_text(self, text: str):
+        if not self.search_list or not text:
+            return False, []
+        found = []
+        for kw in self.search_list:
+            pattern = re.compile(r"(?<!\\w)" + re.escape(kw) + r"(?!\\w)")
+            if pattern.search(text):
+                found.append(kw)
+        return len(found) > 0, found
 
     def parse_new_materials_section(self, page_content):
         """Парсит только секцию 'Новые материалы'"""
@@ -248,6 +272,25 @@ class RadioVolnaParser:
                 print(f"✗ Ошибка в блоке {i}: {e}")
                 continue
         
+        # Дополняем совпадения за счет текста для элементов без найденных слов в заголовке
+        for it in news_items:
+            if not it.get('has_search_keywords'):
+                try:
+                    print(f"Проверяю текст статьи: {it.get('url','')}")
+                    body_text = self.fetch_article_body_text(it['url'])
+                    has_body, found_body = self.check_keywords_in_text(body_text)
+                    if has_body:
+                        it['has_search_keywords'] = True
+                        existed = set(it.get('found_keywords') or [])
+                        for kw in found_body:
+                            if kw not in existed:
+                                existed.add(kw)
+                        it['found_keywords'] = list(existed)
+                        print(f"  ✔ Найдено в тексте: {', '.join(found_body)}")
+                    else:
+                        print("  ✖ Ключевых слов в тексте не найдено")
+                except Exception as e:
+                    print(f"  ⚠ Ошибка при разборе текста: {e}")
         return news_items
 
     def save_to_json(self, data, filename):
@@ -567,7 +610,7 @@ class RadioVolnaParser:
             
             # Генерируем имя выходного файла
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_filename = f"processed_document_{company_name}_{timestamp}.docx"
+            output_filename = f"parsed_{company_name}_{timestamp}.docx"
             output_path = os.path.join(self.reports_path, output_filename)
             
             # Копируем .docx файл целиком
@@ -664,6 +707,7 @@ def main():
     all_news = []
     seen_titles = set()  # Для отслеживания уже найденных заголовков
     page_num = 1  # Начинаем с первой страницы
+    page_break = 0
     
     # Цикл с автоматической остановкой по датам
     while True:
@@ -691,6 +735,7 @@ def main():
             for item in news_data:
                 if item['title'] not in seen_titles:
                     item['page_number'] = page_num
+
                     
                     # Проверяем дату
                     if item['date'] and item['date'] < parser.start_date:
@@ -698,6 +743,7 @@ def main():
                     else:
                         new_items.append(item)
                         seen_titles.add(item['title'])
+
             
             print(f"✅ Найдено {len(news_data)} новостей на странице {page_num}")
             if len(new_items) != len(news_data):
@@ -726,10 +772,12 @@ def main():
             # Если на странице нет новостей в диапазоне, но есть новости - продолжаем
             if not new_items and news_data:
                 print("   ⏭️ Все новости на странице вне диапазона, проверяем следующую")
+                page_break = 0
         else:
             print(f"❌ Новости не найдены на странице {page_num}")
+            page_break += 1
             # Если несколько страниц подряд пустые - останавливаемся
-            if page_num > 25:  # После 25 страницы останавливаемся если пусто
+            if page_break > 5:  # После 25 страницы останавливаемся если пусто
                 print("🏁 Слишком много пустых страниц, завершаем парсинг")
                 break
         
@@ -739,10 +787,7 @@ def main():
         # Пауза между запросами
         time.sleep(1)
         
-        # Защита от бесконечного цикла
-        if page_num > 100:
-            print("⚠️ Достигнут лимит страниц (100), завершаем парсинг")
-            break
+        
     
     # Общие результаты
     print(f"\n{'='*60}")
