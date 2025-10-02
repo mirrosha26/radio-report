@@ -192,7 +192,7 @@ def get_points_summary():
                     for tag, count in tags.items():
                         print(f"    📌 {tag}: {count} пунктов")
             
-            # Проверяем пункты короче 30 секунд
+            # Проверяем пункты короче 30 секунд ТОЛЬКО для тега 'губер'
             cursor.execute("""
                 SELECT 
                     f.file_path,
@@ -200,14 +200,14 @@ def get_points_summary():
                     COUNT(*) as count
                 FROM points p
                 JOIN files f ON p.file_id = f.id
-                WHERE p.seconds < 30
+                WHERE p.seconds < 30 AND p.tag = 'губер'
                 GROUP BY f.file_path, p.tag 
                 ORDER BY f.file_path, p.tag
             """)
             short_points_stats = cursor.fetchall()
             
             if short_points_stats:
-                print("⚠️ Пункты короче 30 сек (исключены из отчетов):")
+                print("⚠️ Пункты 'губер' короче 30 сек (исключены из отчетов):")
                 
                 # Группируем короткие пункты по папкам
                 short_folder_data = {}
@@ -298,7 +298,7 @@ def create_excel_report():
         
         print(f"📁 Папка экспорта: {export_dir.absolute()}")
         print(f"📅 Год: {year}")
-        print(f"⏱️ Минимальная длительность: {min_duration} сек")
+        print(f"⏱️ Минимальная длительность: {min_duration} сек (только для тега 'губер')")
         
         # Путь к шаблону
         template_path = Path("../static/template.xlsx")
@@ -403,7 +403,7 @@ def create_excel_report():
                     # Заполняем шапку отчета
                     fill_report_header(ws, year, month, full_name, company_short, company_full)
                     
-                    # Получаем пункты для этого тега в этой папке (фильтруем по минимальной длительности)
+                    # Получаем пункты для этого тега в этой папке (фильтруем по минимальной длительности ТОЛЬКО для 'губер')
                     cursor.execute("""
                         SELECT 
                             p.point_number,
@@ -415,7 +415,7 @@ def create_excel_report():
                             p.created_at
                         FROM points p
                         JOIN files f ON p.file_id = f.id
-                        WHERE f.file_path LIKE ? AND p.tag = ? AND p.seconds >= ?
+                        WHERE f.file_path LIKE ? AND p.tag = ? AND (p.tag != 'губер' OR p.seconds >= ?)
                         ORDER BY f.filename, p.point_number
                     """, (f'%{folder_name}%', tag, min_duration))
                     
@@ -625,7 +625,7 @@ def create_simple_excel_report():
         export_dir.mkdir(exist_ok=True)
         
         print(f"📁 Папка для экспорта: {export_dir.absolute()}")
-        print(f"⏱️ Минимальная длительность: {min_duration} сек (записи короче исключаются)")
+        print(f"⏱️ Минимальная длительность: {min_duration} сек (только для тега 'губер')")
         
         db_manager = DatabaseManager()
         
@@ -687,7 +687,7 @@ def create_simple_excel_report():
                 ws = wb.active
                 ws.title = folder_name
                 
-                # Получаем все пункты для этой папки (фильтруем по минимальной длительности)
+                # Получаем все пункты для этой папки (фильтруем по минимальной длительности ТОЛЬКО для 'губер')
                 cursor.execute("""
                     SELECT 
                         p.point_number,
@@ -699,7 +699,7 @@ def create_simple_excel_report():
                         p.created_at
                     FROM points p
                     JOIN files f ON p.file_id = f.id
-                    WHERE f.file_path LIKE ? AND p.seconds >= ?
+                    WHERE f.file_path LIKE ? AND (p.tag != 'губер' OR p.seconds >= ?)
                     ORDER BY f.filename, p.point_number
                 """, (f'%{folder_name}%', min_duration))
                 

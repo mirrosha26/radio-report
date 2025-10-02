@@ -8,6 +8,8 @@ env/
 СЕНТЯБРЬ.zip
 СЕНТЯБРЬ/
 reports/
+static/template.docx
+static/template.xlsx
 
 config.yaml
 parsers/config.yaml

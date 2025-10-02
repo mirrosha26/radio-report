@@ -11,7 +11,7 @@ from docx.shared import Inches
 from docx.enum.table import WD_ALIGN_VERTICAL
 
 
-class AstroblParser:
+class JokeParser:
     def __init__(self):
         self.base_url = "https://www.astrobl.ru"
         self.list_url = f"{self.base_url}/press/news"
@@ -76,9 +76,32 @@ class AstroblParser:
             return False, []
         found = []
         for kw in self.search_list:
-            # Ищем ключ как отдельное слово/фразу (границы слова), чтобы 'СВО' не совпадал с 'свои'
-            pattern = r"(?<!\w)" + re.escape(kw) + r"(?!\w)"
-            if re.search(pattern, title, flags=re.IGNORECASE):
+            # Строгое совпадение с учетом регистра и границ слова/фразы
+            pattern = r"(?<!\\w)" + re.escape(kw) + r"(?!\\w)"
+            if re.search(pattern, title):  # без IGNORECASE
+                found.append(kw)
+        return len(found) > 0, found
+
+    def fetch_article_text(self, url: str) -> str:
+        html = self.get(url)
+        if not html:
+            return ''
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            article = soup.select_one('.news-text, [itemprop="articleBody"]')
+            if not article:
+                article = soup.select_one('.content__body_main')
+            return article.get_text(' ', strip=True) if article else ''
+        except Exception:
+            return ''
+
+    def check_keywords_in_text(self, text: str):
+        if not self.search_list or not text:
+            return False, []
+        found = []
+        for kw in self.search_list:
+            pattern = r"(?<!\\w)" + re.escape(kw) + r"(?!\\w)"
+            if re.search(pattern, text):  # без IGNORECASE
                 found.append(kw)
         return len(found) > 0, found
 
@@ -102,13 +125,33 @@ class AstroblParser:
         return f"{sd}+-+{ed}"
 
     def parse_date_text(self, text: str) -> str:
-        # Примеры: "Сегодня в 13:13", "Вчера в 9:28", "23 сентября 2025, 14:55"
+        # Примеры: "Сегодня в 13:13", "Вчера в 9:28", "Вторник, 9:21", "23 сентября 2025, 14:55"
         t = text.strip()
         today = datetime.now()
         if t.lower().startswith("сегодня"):
             return today.strftime("%Y-%m-%d")
         if t.lower().startswith("вчера"):
             return (today - timedelta(days=1)).strftime("%Y-%m-%d")
+        # День недели, например: "Вторник, 9:21" → ближайший прошедший вторник
+        weekdays = {
+            'понедельник': 0,
+            'вторник': 1,
+            'среда': 2,
+            'четверг': 3,
+            'пятница': 4,
+            'суббота': 5,
+            'воскресенье': 6,
+        }
+        mw = re.match(r"^([А-Яа-я]+)\s*(?:,|\s)\s*\d{1,2}:\d{2}", t)
+        if mw:
+            wd_name = mw.group(1).lower()
+            if wd_name in weekdays:
+                target = weekdays[wd_name]
+                diff = (today.weekday() - target) % 7
+                if diff == 0:
+                    diff = 7  # всегда прошлая неделя, если совпал с сегодняшним днём недели
+                dt = today - timedelta(days=diff)
+                return dt.strftime("%Y-%m-%d")
         m = re.search(r"(\d{1,2})\s+(\w+)\s+(\d{4})", t)
         if m:
             day = int(m.group(1))
@@ -156,6 +199,8 @@ class AstroblParser:
                     'image_url': image_url,
                     'has_search_keywords': has_kw,
                     'found_keywords': found_kw,
+                    'has_kw_title': has_kw,
+                    'found_keywords_title': list(found_kw) if found_kw else [],
                     'parsed_at': datetime.now().isoformat(),
                 })
             except Exception as e:
@@ -171,10 +216,10 @@ class AstroblParser:
         table = doc.add_table(rows=1, cols=4)
         table.style = 'Table Grid'
         headers = [
-            'Наименование радиостанции/сайта',
+            'Наименование радиостанции',
             'Дата и время выхода в эфир',
             'Название программы',
-            'Название информационного материала/ ссылка на публикацию',
+            'Название информационного материала',
         ]
         for i, txt in enumerate(headers):
             cell = table.rows[0].cells[i]
@@ -185,16 +230,34 @@ class AstroblParser:
                     r.font.bold = True
                 if i < 3:
                     p.alignment = 1
-        for news in news_with_keywords:
-            formatted_date = ''
-            if news.get('date') and re.match(r"\d{4}-\d{2}-\d{2}", news['date']):
+        def _format_display_date(date_str: str, original_str: str) -> str:
+            if date_str:
+                # ISO yyyy-mm-dd
+                m = re.match(r"^(\d{4}-\d{2}-\d{2})$", date_str)
+                if m:
+                    try:
+                        return datetime.strptime(m.group(1), '%Y-%m-%d').strftime('%d.%m.%y')
+                    except Exception:
+                        pass
+                # ISO with time yyyy-mm-dd HH:MM:SS
+                m2 = re.match(r"^(\d{4}-\d{2}-\d{2})\s+\d{2}:\d{2}:\d{2}$", date_str)
+                if m2:
+                    try:
+                        return datetime.strptime(m2.group(1), '%Y-%m-%d').strftime('%d.%m.%y')
+                    except Exception:
+                        pass
+            # Попытаться распарсить оригинал
+            if original_str:
                 try:
-                    d = datetime.strptime(news['date'], '%Y-%m-%d')
-                    formatted_date = d.strftime('%d.%m.%y')
+                    reparsed = self.parse_date_text(original_str)
+                    mm = re.match(r"^(\d{4}-\d{2}-\d{2})$", reparsed or '')
+                    if mm:
+                        return datetime.strptime(mm.group(1), '%Y-%m-%d').strftime('%d.%m.%y')
                 except Exception:
-                    formatted_date = news['date']
-            else:
-                formatted_date = ''
+                    pass
+            return ''
+        for news in news_with_keywords:
+            formatted_date = _format_display_date(news.get('date') or '', news.get('date_original') or '')
             r1 = table.add_row().cells
             for c in r1:
                 c.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
@@ -215,16 +278,7 @@ class AstroblParser:
             r1[2].text = '«Новости»'
             r1[2].paragraphs[0].alignment = 1
             r1[3].text = news['title']
-            r2 = table.add_row().cells
-            for c in r2:
-                c.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            r2[0].text = site_domain
-            r2[0].paragraphs[0].alignment = 1
-            r2[1].text = formatted_date
-            r2[1].paragraphs[0].alignment = 1
-            r2[2].text = '«Новости»'
-            r2[2].paragraphs[0].alignment = 1
-            r2[3].text = news.get('url', '')
+            
         return table
 
     def replace_variables_in_paragraph(self, paragraph, company_config, news_with_keywords, doc):
@@ -239,6 +293,7 @@ class AstroblParser:
             '$inn_kpp': company_config.get('inn_kpp', ''),
             '$email': company_config.get('email', ''),
             '$ceo_name': company_config.get('ceo_name', ''),
+            '$ogrn': company_config.get('ogrn', ''),
             '$n': n_value,
         }
         text = paragraph.text
@@ -288,8 +343,8 @@ class AstroblParser:
         try:
             company_config = self.config.get('reports', {}).get('docs', {}).get(company_name, {})
             template_paths = [
-                "static/template.docx",
-                "../static/template.docx",
+                "static/template2.docx",
+                "../static/template2.docx",
             ]
             template_path = None
             for path in template_paths:
@@ -297,10 +352,10 @@ class AstroblParser:
                     template_path = path
                     break
             if not template_path:
-                print("❌ template.docx не найден")
+                print("❌ template2.docx не найден")
                 return None
             os.makedirs(self.reports_path, exist_ok=True)
-            out_name = f"processed_document_{company_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+            out_name = f"parsed_{company_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
             out_path = os.path.join(self.reports_path, out_name)
             shutil.copy2(template_path, out_path)
             doc = Document(out_path)
@@ -324,6 +379,14 @@ class AstroblParser:
         print("Запуск парсинга astrobl.ru...")
         print(f"Период: {self.start_date} — {self.end_date}")
         period_param = self.build_period_param()
+        try:
+            start_dt = datetime.strptime(self.start_date, "%Y-%m-%d")
+        except Exception:
+            start_dt = None
+        try:
+            end_dt = datetime.strptime(self.end_date, "%Y-%m-%d")
+        except Exception:
+            end_dt = None
         page = 0
         all_items = []
         seen = set()
@@ -338,8 +401,35 @@ class AstroblParser:
             if not items:
                 print("🏁 Контент закончился, выходим")
                 break
-            new_cnt = 0
+            # Фильтрация по периоду на уровне страницы и ранний выход
+            page_has_newer = False
+            page_has_in_range = False
+            page_has_older = False
+            filtered_items = []
             for it in items:
+                item_dt = None
+                d = it.get('date') or ''
+                if re.match(r"\d{4}-\d{2}-\d{2}", d):
+                    try:
+                        item_dt = datetime.strptime(d, '%Y-%m-%d')
+                    except Exception:
+                        item_dt = None
+                if item_dt is not None and end_dt is not None and item_dt > end_dt:
+                    page_has_newer = True
+                    continue
+                if item_dt is not None and start_dt is not None and item_dt < start_dt:
+                    page_has_older = True
+                    continue
+                page_has_in_range = True
+                filtered_items.append(it)
+            if not page_has_in_range and page_has_older:
+                print("🏁 Достигли начала периода, выходим")
+                break
+            print(f"Заголовки на странице (в диапазоне): {len(filtered_items)}")
+            for it in filtered_items:
+                print(f"  - {it.get('date','')} | {it.get('title','')}")
+            new_cnt = 0
+            for it in filtered_items:
                 key = (it['title'], it['url'])
                 if key not in seen:
                     seen.add(key)
@@ -352,7 +442,30 @@ class AstroblParser:
                 print("⚠️ Лимит страниц 100")
                 break
         print(f"Итого собрано: {len(all_items)}")
+        # Обогащаем совпадения за счет текста статьи, только если в заголовке не найдено
+        for it in all_items:
+            try:
+                if not it.get('has_search_keywords'):
+                    print(f"Проверяю текст статьи: {it.get('url','')}")
+                    body_text = self.fetch_article_text(it['url'])
+                    
+                    has_kw_body, found_kw_body = self.check_keywords_in_text(body_text)
+                    if has_kw_body:
+                        print(f"  ✔ Найдено в тексте: {', '.join(found_kw_body)}")
+                        it['has_search_keywords'] = True
+                        existed = set(it.get('found_keywords') or [])
+                        for kw in found_kw_body:
+                            if kw not in existed:
+                                existed.add(kw)
+                        it['found_keywords'] = list(existed)
+                    else:
+                        print("  ✖ Ключевых слов в тексте не найдено")
+            except Exception as e:
+                print(f"  ⚠ Ошибка при разборе текста: {e}")
         news_with_kw = [x for x in all_items if x.get('has_search_keywords')]
+        print(f"В отчет попадут ({len(news_with_kw)}):")
+        for it in news_with_kw:
+            print(f"  → {it.get('date','')} | {it.get('title','')} | keys: {', '.join(it.get('found_keywords') or [])}")
         # Сортируем от самых старых к самым новым по ISO-дате (YYYY-MM-DD)
         def _date_key(item):
             d = item.get('date') or ''
@@ -368,7 +481,7 @@ class AstroblParser:
 
 
 def main():
-    AstroblParser().run()
+    JokeParser().run()
 
 
 if __name__ == "__main__":
