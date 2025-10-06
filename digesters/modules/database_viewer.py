@@ -8,6 +8,7 @@
 from modules.database import DatabaseManager
 import sqlite3
 import os
+import datetime 
 
 def view_all_points():
     """Показывает все пункты из базы данных"""
